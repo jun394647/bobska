@@ -1,0 +1,23 @@
+name: Notify daily diet menu
+
+on:
+  schedule:
+    # 02:00 UTC = 11:00 KST, Monday-Friday
+    - cron: "0 2 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python notify_diet.py
