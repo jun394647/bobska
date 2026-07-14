@@ -46,18 +46,15 @@ def fetch_today_menu():
 
 
 def build_slack_message(menu_text, today):
+    """Returns None when there is no real menu today (weekend/holiday/closed) -
+    caller should skip sending in that case instead of alerting about the closure."""
+    if menu_text is None or not menu_text.strip() or "공휴일" in menu_text:
+        return None
+
     day_kr = ["월", "화", "수", "목", "금", "토", "일"][today.weekday()]
     date_str = f"{today.strftime('%Y-%m-%d')} ({day_kr})"
-
-    if menu_text is None:
-        text = f"*{date_str} 오늘의 식단*\n오늘은 식단표 운영일이 아닙니다."
-    elif "공휴일" in menu_text or not menu_text:
-        text = f"*{date_str} 오늘의 식단*\n오늘은 공휴일/휴무일로 식단이 없습니다."
-    else:
-        items = "\n".join(f"- {line}" for line in menu_text.split("\n") if line.strip())
-        text = f"*{date_str} 오늘의 식단 (동부식당 점심)*\n{items}"
-
-    return text
+    items = "\n".join(f"- {line}" for line in menu_text.split("\n") if line.strip())
+    return f"*{date_str} 오늘의 식단 (동부식당 점심)*\n{items}"
 
 
 def send_to_slack(text, webhook_url):
@@ -73,6 +70,9 @@ def main():
 
     menu_text, today = fetch_today_menu()
     message = build_slack_message(menu_text, today)
+    if message is None:
+        print(f"{today}: 주말/공휴일/휴무로 식단 없음 - 알림 생략")
+        return
     print(message)
     send_to_slack(message, webhook_url)
 
