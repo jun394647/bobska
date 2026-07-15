@@ -2,8 +2,10 @@ name: Notify daily diet menu
 
 on:
   schedule:
-    # 00:10 UTC = 09:10 KST, Monday-Friday
-    - cron: "10 0 * * 1-5"
+    # 21:30 UTC (prev day) = 06:30 KST, Monday-Friday
+    # GitHub Actions scheduled runs can lag 2-3h behind the requested time,
+    # so the target is set earlier to land close to 09:00 KST in practice.
+    - cron: "30 21 * * 0-4"
   workflow_dispatch: {}
 
 jobs:
