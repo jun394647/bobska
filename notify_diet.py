@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from datetime import datetime, timezone, timedelta
 
 import requests
@@ -8,6 +9,14 @@ from bs4 import BeautifulSoup
 DIET_URL = "https://www.uc.ac.kr/www/CMS/DietMenuMgr/listByWeek.do"
 CAMPUS_PARAMS = {"mCode": "MN207", "searchDietCategory": "4"}  # 동부식당
 KST = timezone(timedelta(hours=9))
+
+
+class DateNotListed(Exception):
+    """Today's date isn't in the site's currently displayed week yet.
+
+    Seen in practice right after the week rolls over (e.g. Monday morning):
+    the site can lag before it starts showing the new week's table, so this
+    is treated as retryable rather than assumed to mean "no menu today"."""
 
 
 def fetch_today_menu():
@@ -24,7 +33,7 @@ def fetch_today_menu():
     dates = [th.select_one(".date").get_text(strip=True) for th in header_cells]
 
     if str(today) not in dates:
-        return None, today  # weekend or out of range
+        raise DateNotListed(f"{today}가 이번주 식단표({dates})에 없습니다")
 
     col_index = dates.index(str(today))
 
@@ -46,9 +55,9 @@ def fetch_today_menu():
 
 
 def build_slack_message(menu_text, today):
-    """Returns None when there is no real menu today (weekend/holiday/closed) -
-    caller should skip sending in that case instead of alerting about the closure."""
-    if menu_text is None or not menu_text.strip() or "공휴일" in menu_text:
+    """Returns None when today's row is genuinely empty/holiday (site has the
+    date listed but no menu) - caller should skip sending in that case."""
+    if not menu_text.strip() or "공휴일" in menu_text:
         return None
 
     day_kr = ["월", "화", "수", "목", "금", "토", "일"][today.weekday()]
@@ -62,16 +71,34 @@ def send_to_slack(text, webhook_url):
     resp.raise_for_status()
 
 
+MAX_ATTEMPTS = 4
+RETRY_WAIT_SECONDS = 300  # 5 min - gives the site time to roll over to the new week
+
+
 def main():
     webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not webhook_url:
         print("SLACK_WEBHOOK_URL 환경변수가 설정되어 있지 않습니다.", file=sys.stderr)
         sys.exit(1)
 
-    menu_text, today = fetch_today_menu()
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            menu_text, today = fetch_today_menu()
+            break
+        except DateNotListed as e:
+            print(f"시도 {attempt}/{MAX_ATTEMPTS} 실패: {e}")
+            if attempt == MAX_ATTEMPTS:
+                send_to_slack(
+                    f"[식단봇] 오늘 날짜가 식단표 사이트에 아직 반영되지 않았습니다 ({e}). "
+                    "사이트를 직접 확인해주세요.",
+                    webhook_url,
+                )
+                return
+            time.sleep(RETRY_WAIT_SECONDS)
+
     message = build_slack_message(menu_text, today)
     if message is None:
-        print(f"{today}: 주말/공휴일/휴무로 식단 없음 - 알림 생략")
+        print(f"{today}: 공휴일/휴무로 식단 없음 - 알림 생략")
         return
     print(message)
     send_to_slack(message, webhook_url)
